@@ -41,38 +41,54 @@ async function replyWithAttachments(event, isReplyAll) {
         if (!attachments || attachments.length === 0) {
             item.notificationMessages.replaceAsync(notificationId, {
                 type: Office.MailboxEnums.ItemNotificationMessageType.InformationalMessage,
-                message: "No attachments found on this email.",
+                message: "No attachments found.",
                 icon: "iconid"
             });
             event.completed();
             return;
         }
 
-        // Fetch content for all attachments
+        item.notificationMessages.replaceAsync(notificationId, {
+            type: Office.MailboxEnums.ItemNotificationMessageType.ProgressIndicator,
+            message: `Step 1: Found ${attachments.length} attachments, downloading...`
+        });
+
+        // Fetch content for all attachments (excluding inline images like signatures)
         const attachPromises = attachments.map(async (att) => {
+            if (att.isInline) {
+                return null; // Skip embedded images
+            }
             try {
                 const content = await getAttachmentContentAsync(att.id);
-                // In Mailbox 1.15, Base64 is supported in displayReplyFormAsync
                 if (content.format === Office.MailboxEnums.AttachmentContentFormat.Base64 || content.format === "base64") {
                     return {
-                        type: "base64", // Using string literal to avoid missing enum issues
+                        type: "base64",
                         name: att.name,
                         base64file: content.content
                     };
                 }
             } catch (err) {
-                console.warn(`Could not fetch attachment ${att.name}`, err);
+                // ignore
             }
-            return null; // Ignore unsupported/failed attachments
+            return null;
         });
 
         const rawAttachments = await Promise.all(attachPromises);
         const replyAttachments = rawAttachments.filter(a => a !== null);
 
+        item.notificationMessages.replaceAsync(notificationId, {
+            type: Office.MailboxEnums.ItemNotificationMessageType.ProgressIndicator,
+            message: `Step 2: Downloaded ${replyAttachments.length} attachments. Opening form...`
+        });
+
         const formData = {
-            htmlBody: "", // This will be prepended to the original email body
-            attachments: replyAttachments
+            htmlBody: ""
         };
+        
+        // Only include attachments property if we actually have some
+        if (replyAttachments.length > 0) {
+            formData.attachments = replyAttachments;
+        }
 
         const handleDisplayReplyResult = (result) => {
             if (result.status === Office.AsyncResultStatus.Failed) {
@@ -81,13 +97,23 @@ async function replyWithAttachments(event, isReplyAll) {
                     message: "Failed to open reply form: " + result.error.message
                 });
             } else {
-                item.notificationMessages.removeAsync(notificationId);
+                item.notificationMessages.replaceAsync(notificationId, {
+                    type: Office.MailboxEnums.ItemNotificationMessageType.InformationalMessage,
+                    message: "Reply opened successfully!",
+                    icon: "iconid"
+                });
             }
             event.completed();
         };
 
-        // Fallback to ensure event is eventually completed even if the callback hangs
-        setTimeout(() => { event.completed(); }, 15000);
+        // Fallback to ensure event is eventually completed
+        setTimeout(() => { 
+            item.notificationMessages.replaceAsync(notificationId, {
+                type: Office.MailboxEnums.ItemNotificationMessageType.ErrorMessage,
+                message: "Process timed out after 15 seconds."
+            });
+            event.completed(); 
+        }, 15000);
 
         if (isReplyAll) {
             item.displayReplyAllFormAsync(formData, handleDisplayReplyResult);
