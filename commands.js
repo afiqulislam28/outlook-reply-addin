@@ -53,9 +53,9 @@ async function replyWithAttachments(event, isReplyAll) {
             try {
                 const content = await getAttachmentContentAsync(att.id);
                 // In Mailbox 1.15, Base64 is supported in displayReplyFormAsync
-                if (content.format === Office.MailboxEnums.AttachmentContentFormat.Base64) {
+                if (content.format === Office.MailboxEnums.AttachmentContentFormat.Base64 || content.format === "base64") {
                     return {
-                        type: Office.MailboxEnums.AttachmentType.Base64,
+                        type: "base64", // Using string literal to avoid missing enum issues
                         name: att.name,
                         base64file: content.content
                     };
@@ -85,6 +85,9 @@ async function replyWithAttachments(event, isReplyAll) {
             }
             event.completed();
         };
+
+        // Fallback to ensure event is eventually completed even if the callback hangs
+        setTimeout(() => { event.completed(); }, 15000);
 
         if (isReplyAll) {
             item.displayReplyAllFormAsync(formData, handleDisplayReplyResult);
