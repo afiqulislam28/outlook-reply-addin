@@ -1,8 +1,27 @@
 /* global Office */
 
 Office.onReady(() => {
-    // If needed, Office is ready
+    // Office is ready
 });
+
+/**
+ * Safely encodes a UTF-8 string to Base64 (handles Unicode characters and large text).
+ * @param {string} str
+ * @returns {string}
+ */
+function utf8ToBase64(str) {
+    if (typeof TextEncoder !== "undefined") {
+        const bytes = new TextEncoder().encode(str);
+        let binary = "";
+        const len = bytes.length;
+        const chunkSize = 8192;
+        for (let i = 0; i < len; i += chunkSize) {
+            binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + chunkSize, len)));
+        }
+        return btoa(binary);
+    }
+    return btoa(unescape(encodeURIComponent(str)));
+}
 
 /**
  * Helper function to retrieve the attachment content.
@@ -22,70 +41,113 @@ function getAttachmentContentAsync(attachmentId) {
 }
 
 /**
- * Main logic to handle replying with attachments.
+ * Main logic to handle replying with attachments silently without confusing step banners.
  * @param {Office.AddinCommands.Event} event
  * @param {boolean} isReplyAll
  */
 async function replyWithAttachments(event, isReplyAll) {
     const item = Office.context.mailbox.item;
-    const attachments = item.attachments;
     const notificationId = "replyProgress";
 
-    // Show progress notification
-    item.notificationMessages.replaceAsync(notificationId, {
-        type: Office.MailboxEnums.ItemNotificationMessageType.ProgressIndicator,
-        message: "Fetching attachments and preparing reply..."
-    });
+    // Clear any previous notification message from earlier actions
+    try {
+        item.notificationMessages.removeAsync(notificationId);
+    } catch (e) {
+        // ignore
+    }
+
+    let timeoutTimer = null;
+    let completed = false;
+    const completeEvent = () => {
+        if (!completed) {
+            completed = true;
+            if (timeoutTimer) {
+                clearTimeout(timeoutTimer);
+                timeoutTimer = null;
+            }
+            event.completed();
+        }
+    };
+
+    // Safety fallback to complete the event if host hangs
+    timeoutTimer = setTimeout(() => {
+        completeEvent();
+    }, 15000);
 
     try {
-        if (!attachments || attachments.length === 0) {
-            item.notificationMessages.replaceAsync(notificationId, {
-                type: Office.MailboxEnums.ItemNotificationMessageType.InformationalMessage,
-                message: "No attachments found.",
-                icon: "iconid"
-            });
-            event.completed();
-            return;
-        }
+        const attachments = item.attachments || [];
+        let replyAttachments = [];
 
-        item.notificationMessages.replaceAsync(notificationId, {
-            type: Office.MailboxEnums.ItemNotificationMessageType.ProgressIndicator,
-            message: `Step 1: Found ${attachments.length} attachments, downloading...`
-        });
-
-        // Fetch content for all attachments (excluding inline images like signatures)
-        const attachPromises = attachments.map(async (att) => {
-            if (att.isInline) {
-                return null; // Skip embedded images
-            }
-            try {
-                const content = await getAttachmentContentAsync(att.id);
-                if (content.format === Office.MailboxEnums.AttachmentContentFormat.Base64 || content.format === "base64") {
-                    return {
-                        type: "base64",
-                        name: att.name,
-                        base64file: content.content
-                    };
+        if (attachments.length > 0) {
+            // Fetch content for all attachments (excluding inline images like signatures)
+            const attachPromises = attachments.map(async (att) => {
+                if (att.isInline) {
+                    return null; // Skip embedded images (native reply preserves them in quoted body)
                 }
-            } catch (err) {
-                // ignore
-            }
-            return null;
-        });
 
-        const rawAttachments = await Promise.all(attachPromises);
-        const replyAttachments = rawAttachments.filter(a => a !== null);
+                try {
+                    const content = await getAttachmentContentAsync(att.id);
 
-        item.notificationMessages.replaceAsync(notificationId, {
-            type: Office.MailboxEnums.ItemNotificationMessageType.ProgressIndicator,
-            message: `Step 2: Downloaded ${replyAttachments.length} attachments. Opening form...`
-        });
+                    // 1. Standard file attachments (PDF, Word, Excel, Images, etc.)
+                    if (content.format === Office.MailboxEnums.AttachmentContentFormat.Base64 || content.format === "base64") {
+                        return {
+                            type: "base64",
+                            name: att.name,
+                            base64file: content.content
+                        };
+                    }
+
+                    // 2. Attached email items (.msg / .eml format)
+                    if (content.format === Office.MailboxEnums.AttachmentContentFormat.Eml || content.format === "eml") {
+                        let name = att.name || "attached_message.eml";
+                        // Since Office.js returns MIME RFC822 text, using .eml allows Outlook & all clients to open it natively
+                        if (name.toLowerCase().endsWith(".msg")) {
+                            name = name.slice(0, -4) + ".eml";
+                        } else if (!name.toLowerCase().endsWith(".eml")) {
+                            name += ".eml";
+                        }
+                        return {
+                            type: "base64",
+                            name: name,
+                            base64file: utf8ToBase64(content.content)
+                        };
+                    }
+
+                    // 3. Calendar items (.ics)
+                    if (content.format === Office.MailboxEnums.AttachmentContentFormat.ICalendar || content.format === "iCalendar") {
+                        let name = att.name || "event.ics";
+                        if (!name.toLowerCase().endsWith(".ics")) {
+                            name += ".ics";
+                        }
+                        return {
+                            type: "base64",
+                            name: name,
+                            base64file: utf8ToBase64(content.content)
+                        };
+                    }
+                } catch (err) {
+                    console.warn(`Could not fetch attachment content for "${att.name}":`, err);
+                    // Fallback for item attachments if getAttachmentContentAsync fails
+                    if (att.attachmentType === Office.MailboxEnums.AttachmentType.Item || att.attachmentType === "item") {
+                        return {
+                            type: "item",
+                            name: att.name,
+                            itemId: att.id
+                        };
+                    }
+                }
+                return null;
+            });
+
+            const rawAttachments = await Promise.all(attachPromises);
+            replyAttachments = rawAttachments.filter(a => a !== null);
+        }
 
         const formData = {
             htmlBody: ""
         };
-        
-        // Only include attachments property if we actually have some
+
+        // Only attach if there are non-inline attachments
         if (replyAttachments.length > 0) {
             formData.attachments = replyAttachments;
         }
@@ -97,23 +159,11 @@ async function replyWithAttachments(event, isReplyAll) {
                     message: "Failed to open reply form: " + result.error.message
                 });
             } else {
-                item.notificationMessages.replaceAsync(notificationId, {
-                    type: Office.MailboxEnums.ItemNotificationMessageType.InformationalMessage,
-                    message: "Reply opened successfully!",
-                    icon: "iconid"
-                });
+                // Ensure notification bar is clean and clear
+                item.notificationMessages.removeAsync(notificationId);
             }
-            event.completed();
+            completeEvent();
         };
-
-        // Fallback to ensure event is eventually completed
-        setTimeout(() => { 
-            item.notificationMessages.replaceAsync(notificationId, {
-                type: Office.MailboxEnums.ItemNotificationMessageType.ErrorMessage,
-                message: "Process timed out after 15 seconds."
-            });
-            event.completed(); 
-        }, 15000);
 
         if (isReplyAll) {
             item.displayReplyAllFormAsync(formData, handleDisplayReplyResult);
@@ -122,12 +172,12 @@ async function replyWithAttachments(event, isReplyAll) {
         }
 
     } catch (error) {
-        console.error(error);
+        console.error("Error in replyWithAttachments:", error);
         item.notificationMessages.replaceAsync(notificationId, {
             type: Office.MailboxEnums.ItemNotificationMessageType.ErrorMessage,
-            message: "An error occurred while fetching attachments."
+            message: "An error occurred while opening the reply."
         });
-        event.completed();
+        completeEvent();
     }
 }
 
