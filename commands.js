@@ -89,21 +89,10 @@ async function replyWithAttachments(event, isReplyAll) {
                     return null; // Skip embedded images (native reply preserves them in quoted body)
                 }
 
-                // 1. Outlook Item Attachments (attached emails / .msg / appointments)
-                // Attach directly as an Outlook Item by ID so it preserves the native Outlook item format and icon
-                if (att.attachmentType === Office.MailboxEnums.AttachmentType.Item || att.attachmentType === "item") {
-                    return {
-                        type: Office.MailboxEnums.AttachmentType.Item,
-                        name: att.name,
-                        itemId: att.id,
-                        id: att.id
-                    };
-                }
-
-                // 2. Standard File Attachments (PDF, Excel, Word, Images, etc.)
                 try {
                     const content = await getAttachmentContentAsync(att.id);
 
+                    // 1. Standard file attachments (PDF, Excel, Word, Images, etc.)
                     if (content.format === Office.MailboxEnums.AttachmentContentFormat.Base64 || content.format === "base64") {
                         return {
                             type: "base64",
@@ -112,34 +101,34 @@ async function replyWithAttachments(event, isReplyAll) {
                         };
                     }
 
-                    // Fallback for item attachments if not captured by attachmentType
+                    // 2. Attached email items (.msg / .eml format)
+                    // Office.js exports attached messages as RFC 822 MIME text (.eml).
+                    // Re-attaching as .eml enables Outlook & all email clients to open the message seamlessly.
                     if (content.format === Office.MailboxEnums.AttachmentContentFormat.Eml || content.format === "eml") {
+                        let baseName = att.name || "attached_message";
+                        let fileName = baseName.toLowerCase().endsWith(".eml") 
+                            ? baseName 
+                            : (baseName.replace(/\.[^.]+$/, "") + ".eml");
+
                         return {
-                            type: Office.MailboxEnums.AttachmentType.Item,
-                            name: att.name,
-                            itemId: att.id,
-                            id: att.id
+                            type: "base64",
+                            name: fileName,
+                            base64file: utf8ToBase64(content.content)
                         };
                     }
 
+                    // 3. Calendar appointments (.ics)
                     if (content.format === Office.MailboxEnums.AttachmentContentFormat.ICalendar || content.format === "iCalendar") {
+                        let baseName = att.name || "event";
+                        let fileName = baseName.toLowerCase().endsWith(".ics") ? baseName : (baseName + ".ics");
                         return {
                             type: "base64",
-                            name: att.name,
+                            name: fileName,
                             base64file: utf8ToBase64(content.content)
                         };
                     }
                 } catch (err) {
                     console.warn(`Could not fetch attachment content for "${att.name}":`, err);
-                    // Fallback: If it's an item attachment and content retrieval failed, try attaching by itemId
-                    if (att.attachmentType === Office.MailboxEnums.AttachmentType.Item || att.attachmentType === "item") {
-                        return {
-                            type: Office.MailboxEnums.AttachmentType.Item,
-                            name: att.name,
-                            itemId: att.id,
-                            id: att.id
-                        };
-                    }
                 }
                 return null;
             });
@@ -175,9 +164,6 @@ async function replyWithAttachments(event, isReplyAll) {
         } else {
             item.displayReplyFormAsync(formData, handleDisplayReplyResult);
         }
-
-        // Dismiss Outlook's native "Working on your request" message immediately
-        completeEvent();
 
     } catch (error) {
         console.error("Error in replyWithAttachments:", error);
