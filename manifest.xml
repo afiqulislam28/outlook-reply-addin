@@ -11,11 +11,11 @@
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Reply with Attachments" />
   <Description DefaultValue="Allows replying to emails while keeping the original attachments." />
-  <IconUrl DefaultValue="https://raw.githubusercontent.com/OfficeDev/office-js-snippets/main/assets/icon-32.png"/>
-  <HighResolutionIconUrl DefaultValue="https://raw.githubusercontent.com/OfficeDev/office-js-snippets/main/assets/icon-80.png"/>
+  <IconUrl DefaultValue="https://afiqulislam28.github.io/outlook-reply-addin/icon.jpg"/>
+  <HighResolutionIconUrl DefaultValue="https://afiqulislam28.github.io/outlook-reply-addin/icon.jpg"/>
   <SupportUrl DefaultValue="https://www.contoso.com/help" />
   <AppDomains>
-    <AppDomain>https://localhost:3000</AppDomain>
+    <AppDomain>https://afiqulislam28.github.io/outlook-reply-addin</AppDomain>
   </AppDomains>
   <Hosts>
     <Host Name="Mailbox" />
@@ -28,7 +28,7 @@
   <FormSettings>
     <Form xsi:type="ItemRead">
       <DesktopSettings>
-        <SourceLocation DefaultValue="https://localhost:3000/commands.html"/>
+        <SourceLocation DefaultValue="https://afiqulislam28.github.io/outlook-reply-addin/commands.html"/>
         <RequestedHeight>250</RequestedHeight>
       </DesktopSettings>
     </Form>
@@ -94,12 +94,12 @@
     </Hosts>
     <Resources>
       <bt:Images>
-        <bt:Image id="Icon.16x16" DefaultValue="https://raw.githubusercontent.com/OfficeDev/office-js-snippets/main/assets/icon-16.png"/>
-        <bt:Image id="Icon.32x32" DefaultValue="https://raw.githubusercontent.com/OfficeDev/office-js-snippets/main/assets/icon-32.png"/>
-        <bt:Image id="Icon.80x80" DefaultValue="https://raw.githubusercontent.com/OfficeDev/office-js-snippets/main/assets/icon-80.png"/>
+        <bt:Image id="Icon.16x16" DefaultValue="https://afiqulislam28.github.io/outlook-reply-addin/icon.jpg"/>
+        <bt:Image id="Icon.32x32" DefaultValue="https://afiqulislam28.github.io/outlook-reply-addin/icon.jpg"/>
+        <bt:Image id="Icon.80x80" DefaultValue="https://afiqulislam28.github.io/outlook-reply-addin/icon.jpg"/>
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="Commands.Url" DefaultValue="https://localhost:3000/commands.html" />
+        <bt:Url id="Commands.Url" DefaultValue="https://afiqulislam28.github.io/outlook-reply-addin/commands.html" />
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="GroupLabel" DefaultValue="Reply with Attachments" />
