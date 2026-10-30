@@ -65,7 +65,11 @@ async function replyWithAttachments(event, isReplyAll) {
                 clearTimeout(timeoutTimer);
                 timeoutTimer = null;
             }
-            event.completed();
+            try {
+                event.completed();
+            } catch (e) {
+                // ignore
+            }
         }
     };
 
@@ -79,16 +83,27 @@ async function replyWithAttachments(event, isReplyAll) {
         let replyAttachments = [];
 
         if (attachments.length > 0) {
-            // Fetch content for all attachments (excluding inline images like signatures)
+            // Process all attachments (excluding inline images like signatures)
             const attachPromises = attachments.map(async (att) => {
                 if (att.isInline) {
                     return null; // Skip embedded images (native reply preserves them in quoted body)
                 }
 
+                // 1. Outlook Item Attachments (attached emails / .msg / appointments)
+                // Attach directly as an Outlook Item by ID so it preserves the native Outlook item format and icon
+                if (att.attachmentType === Office.MailboxEnums.AttachmentType.Item || att.attachmentType === "item") {
+                    return {
+                        type: Office.MailboxEnums.AttachmentType.Item,
+                        name: att.name,
+                        itemId: att.id,
+                        id: att.id
+                    };
+                }
+
+                // 2. Standard File Attachments (PDF, Excel, Word, Images, etc.)
                 try {
                     const content = await getAttachmentContentAsync(att.id);
 
-                    // 1. Standard file attachments (PDF, Word, Excel, Images, etc.)
                     if (content.format === Office.MailboxEnums.AttachmentContentFormat.Base64 || content.format === "base64") {
                         return {
                             type: "base64",
@@ -97,42 +112,32 @@ async function replyWithAttachments(event, isReplyAll) {
                         };
                     }
 
-                    // 2. Attached email items (.msg / .eml format)
+                    // Fallback for item attachments if not captured by attachmentType
                     if (content.format === Office.MailboxEnums.AttachmentContentFormat.Eml || content.format === "eml") {
-                        let name = att.name || "attached_message.eml";
-                        // Since Office.js returns MIME RFC822 text, using .eml allows Outlook & all clients to open it natively
-                        if (name.toLowerCase().endsWith(".msg")) {
-                            name = name.slice(0, -4) + ".eml";
-                        } else if (!name.toLowerCase().endsWith(".eml")) {
-                            name += ".eml";
-                        }
                         return {
-                            type: "base64",
-                            name: name,
-                            base64file: utf8ToBase64(content.content)
+                            type: Office.MailboxEnums.AttachmentType.Item,
+                            name: att.name,
+                            itemId: att.id,
+                            id: att.id
                         };
                     }
 
-                    // 3. Calendar items (.ics)
                     if (content.format === Office.MailboxEnums.AttachmentContentFormat.ICalendar || content.format === "iCalendar") {
-                        let name = att.name || "event.ics";
-                        if (!name.toLowerCase().endsWith(".ics")) {
-                            name += ".ics";
-                        }
                         return {
                             type: "base64",
-                            name: name,
+                            name: att.name,
                             base64file: utf8ToBase64(content.content)
                         };
                     }
                 } catch (err) {
                     console.warn(`Could not fetch attachment content for "${att.name}":`, err);
-                    // Fallback for item attachments if getAttachmentContentAsync fails
+                    // Fallback: If it's an item attachment and content retrieval failed, try attaching by itemId
                     if (att.attachmentType === Office.MailboxEnums.AttachmentType.Item || att.attachmentType === "item") {
                         return {
-                            type: "item",
+                            type: Office.MailboxEnums.AttachmentType.Item,
                             name: att.name,
-                            itemId: att.id
+                            itemId: att.id,
+                            id: att.id
                         };
                     }
                 }
@@ -170,6 +175,9 @@ async function replyWithAttachments(event, isReplyAll) {
         } else {
             item.displayReplyFormAsync(formData, handleDisplayReplyResult);
         }
+
+        // Dismiss Outlook's native "Working on your request" message immediately
+        completeEvent();
 
     } catch (error) {
         console.error("Error in replyWithAttachments:", error);
